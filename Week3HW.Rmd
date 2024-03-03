@@ -1,0 +1,194 @@
+---
+title: "Week 3 Assignment"
+output: pdf_document
+date: "2024-02-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Hello Week 3! 
+## NYPD Shooting Incident Data Report
+
+### Step 0: Load Required Packages + Import Data
+```{r data_import}
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+
+# Read data from City of New York website
+## Data validation showed that certain string values were blank instead of NA - this is corrected with na.strings
+data <- read.csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv", na.strings=c("",NA))
+```
+
+### Step 1: Exploratory Data Analysis
+```{r data_explore}
+# Dimension
+dim(data)
+
+# Summary Statistics
+summary(data)
+```
+
+The NYPD Shooting Incident dataset contains 21 columns and 27,312 rows. Of the 21 columns:
+
+* 14 columns are character data types
+* 7 columns are numeric data types
+  + JURISDICTION_CODE, Latitude, and Longitude each contain limited null values
+
+Here is a subset of the data:
+```{r head}
+head(data)
+```  
+The following columns indicate that they could be treated as categorical values:  
+* BORO
+* PRECINCT
+* LOC_OF_OCCUR_DESC
+* JURISDICTION_CODE
+* STATISTICAL_MURDER_FLAG
+* PERP_AGE_GROUP
+* PERP_SEX
+* PERP_RACE
+* VIC_AGE_GROUP
+* VIC_SEX
+* VIC_RACE
+
+The following prints the frequencies of each potentially categorical value:
+
+```{r cat_explore}
+count(data,BORO)
+count(data,PRECINCT)
+count(data,LOC_OF_OCCUR_DESC)
+count(data,JURISDICTION_CODE)
+count(data,STATISTICAL_MURDER_FLAG)
+count(data,PERP_AGE_GROUP)
+count(data,PERP_SEX)
+count(data,PERP_RACE)
+count(data,VIC_AGE_GROUP)
+count(data,VIC_SEX)
+count(data,VIC_RACE)
+```
+
+Upon reviewing frequencies, certain variables contain blank values that should be converted to null. This will be fixed at time of import. Additionally, for modeling, we will also need to convert these categorical values to numeric representations.
+
+
+### Step 2: Data Cleaning
+#### Convert categorical values to numeric representations
+```{r factors}
+# Convert categorical values to factors
+data$BORO <- factor(data$BORO, exclude = NULL)
+data$PRECINCT <- factor(data$PRECINCT, exclude = NULL)
+data$LOC_OF_OCCUR_DESC <- factor(data$LOC_OF_OCCUR_DESC, exclude = NULL)
+data$JURISDICTION_CODE <- factor(data$JURISDICTION_CODE, exclude = NULL)
+data$STATISTICAL_MURDER_FLAG <- factor(data$STATISTICAL_MURDER_FLAG, exclude = NULL)
+data$PERP_AGE_GROUP <- factor(data$PERP_AGE_GROUP, exclude = NULL)
+data$PERP_SEX <- factor(data$PERP_SEX, exclude = NULL)
+data$PERP_RACE <- factor(data$PERP_RACE, exclude = NULL)
+data$VIC_AGE_GROUP <- factor(data$VIC_AGE_GROUP, exclude = NULL)
+data$VIC_SEX <- factor(data$VIC_SEX, exclude = NULL)
+data$VIC_RACE <- factor(data$VIC_RACE, exclude = NULL)
+
+num_data <- model.matrix(~.-1, 
+                     data = data[,c("BORO",
+                                    "PRECINCT",
+                                    "LOC_OF_OCCUR_DESC",
+                                    "JURISDICTION_CODE",
+                                    "STATISTICAL_MURDER_FLAG",
+                                    "PERP_AGE_GROUP",
+                                    "PERP_SEX",
+                                    "PERP_RACE",
+                                    "VIC_AGE_GROUP",
+                                    "VIC_SEX",
+                                    "VIC_RACE")],
+                     contrasts.arg = list(
+                       BORO = contrasts(data$BORO, contrasts = FALSE),
+                      PRECINCT = contrasts(data$PRECINCT, contrasts = FALSE),
+                      LOC_OF_OCCUR_DESC = contrasts(data$LOC_OF_OCCUR_DESC, contrasts = FALSE),
+                      JURISDICTION_CODE = contrasts(data$JURISDICTION_CODE, contrasts = FALSE),
+                        STATISTICAL_MURDER_FLAG = contrasts(data$STATISTICAL_MURDER_FLAG, contrasts = FALSE),
+                      PERP_AGE_GROUP = contrasts(data$PERP_AGE_GROUP, contrasts = FALSE),
+                      PERP_SEX = contrasts(data$PERP_SEX, contrasts = FALSE),
+                      PERP_RACE = contrasts(data$PERP_RACE, contrasts = FALSE),
+                      VIC_AGE_GROUP = contrasts(data$VIC_AGE_GROUP, contrasts = FALSE),
+                      VIC_SEX = contrasts(data$VIC_SEX, contrasts = FALSE),
+                      VIC_RACE = contrasts(data$VIC_RACE, contrasts = FALSE)              
+                                        ))
+
+model_data <- cbind(data,num_data)
+```
+
+Next, as date values can be difficult to incorporate into models, it is important to understand if there are any trends/seasonality with dates that could influence a model.
+
+```{r shooting_dates}
+model_data$OCCUR_DATE <- as.Date(model_data$OCCUR_DATE,"%m/%d/%Y")
+
+ggplot(model_data, aes(x=floor_date(OCCUR_DATE, "month"))) + 
+    geom_point(stat="count") +
+  scale_x_continuous(breaks = round(seq(min(model_data$OCCUR_DATE), max(model_data$OCCUR_DATE), by = 365*4),1))+
+  labs(x="Occurance Date",y="Count")+
+  ggtitle(label="Monthly Shooting Incidents in New York")
+```
+
+Overall, shooting rates generally declined at a monthly rate between 2006 and 2018, but then increased again. As this data is so still granular at a monthly level, it is important to aggregate it to a slightly higher level to see if any additional trends appear. 
+```{r shooting_dates_annual}
+ggplot(model_data, aes(x=floor_date(OCCUR_DATE, "year"))) + 
+    geom_bar(stat="count") +
+  scale_x_continuous(breaks = round(seq(min(model_data$OCCUR_DATE), max(model_data$OCCUR_DATE), by = 365*4),1))+
+  labs(x="Occurance Date",y="Count")+
+  ggtitle(label="Annual Shooting Incidents in New York")
+```
+
+Viewing this data at an annual level reveals a more consumable trend - shootings in New York were relatively stable between 2006 to 2010, at which point shootings rapidly declined until rapidly increasing in 2019.
+
+### Step 3: Modeling
+For this assignment, I will be creating a model to evaluate if a shooting perpetrator's age and sex correlates with a shooting victim's sex.
+
+```{r model_subset}
+# Create new df with variables of interest
+model_data_subset <- model_data[,c("PERP_AGE_GROUP(null)" 
+                                   ,"PERP_AGE_GROUP<18" 
+                                   ,"PERP_AGE_GROUP1020"
+                                   ,"PERP_AGE_GROUP18-24"
+                                   ,"PERP_AGE_GROUP224"
+                                   ,"PERP_AGE_GROUP25-44"
+                                   ,"PERP_AGE_GROUP45-64","PERP_AGE_GROUP65+"
+                                   ,"PERP_AGE_GROUP940"
+                                   ,"PERP_AGE_GROUPUNKNOWN"
+                                   ,"PERP_SEX(null)"
+                                   ,"PERP_SEXF"
+                                   ,"PERP_SEXM"
+                                   ,"PERP_SEXU"
+                                   ,"PERP_SEXNA"
+                                   ,"VIC_SEXF"
+                                   ,"VIC_SEXM"
+                                   ,"VIC_SEXU"   )]
+
+# Remove null/missing/invalid perp ages
+model_data_subset <- subset(model_data_subset,"PERP_AGE_GROUP(null)" != 1 &
+                                          PERP_AGE_GROUP1020 != 1 &
+                                         PERP_AGE_GROUP224 != 1 &
+                                        PERP_AGE_GROUP940 != 1 &
+                                         PERP_AGE_GROUPUNKNOWN != 1 )
+
+# Remove null/missing/invalid perp sex
+model_data_subset <- subset(model_data_subset,"PERP_SEX(null)" != 1 & PERP_SEXNA != 1)
+
+# Remove null/missing/invalid vic sex
+model_data_subset <- subset(model_data_subset,VIC_SEXU != 1)
+```
+
+Now that missing and invalid values have been removed, it is possible to compile a linear model.
+
+```{r linear_model}
+vicsex <- lm(VIC_SEXF~model_data_subset$"PERP_AGE_GROUP18-24"
+             +model_data_subset$"PERP_AGE_GROUP25-44"
+             +model_data_subset$"PERP_AGE_GROUP45-64"
+             +model_data_subset$"PERP_AGE_GROUP65+"
+             +model_data_subset$"PERP_SEXF", data = model_data_subset)
+summary(vicsex)
+```
+The output of this model using the NYPD Shooting Incident Data Report data indicates that a shooting perpetrator's age and sex does not effectively predict a shooting victim's sex as indicated by a low adjusted R-Square (0.01). However, both perpetrator age and sex p-values indicate statistical significance, therefore there is a statistical relationship that exists in this model.
+
+### Step 4: Bias
+There are a few instances in which bias may appear in this dataset. In particular, this dataset only includes reported shootings - if a shooting was not reported, it would not appear in this dataset. This may exclude individuals who are unable to report a shooting for reasons such as fear of additional harm or legal reasons for not being able to report a crime.
